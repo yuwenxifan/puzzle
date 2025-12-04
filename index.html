@@ -118,7 +118,7 @@
         .block {
             position: absolute;
             border-radius: 8px;
-            cursor: move;
+            cursor: pointer;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -133,6 +133,26 @@
             z-index: 2;
             border: 3px solid rgba(255,255,255,0.3);
             touch-action: none;
+        }
+
+        .block.moving {
+            transition: left 0.25s ease-out, top 0.25s ease-out;
+        }
+
+        .block.blocked {
+            animation: shake 0.4s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% {
+                transform: translate(0, 0);
+            }
+            25% {
+                transform: translate(var(--shake-x, 0), var(--shake-y, 0));
+            }
+            75% {
+                transform: translate(calc(var(--shake-x, 0) * -0.5), calc(var(--shake-y, 0) * -0.5));
+            }
         }
 
         .block:hover {
@@ -311,6 +331,8 @@
         let draggedBlock = null;
         let startX, startY;
         let initialBlockX, initialBlockY;
+        let isDragging = false;
+        let isAnimating = false;
 
         // 计算实际单元格大小
         function updateCellSize() {
@@ -414,9 +436,11 @@
         }
 
         function startDrag(e) {
+            if (isAnimating) return;
+
             e.preventDefault();
             draggedBlock = e.target;
-            draggedBlock.classList.add('dragging');
+            isDragging = false;
 
             // 支持触摸和鼠标事件
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -445,6 +469,14 @@
             const deltaX = clientX - startX;
             const deltaY = clientY - startY;
 
+            // 判断是否开始拖拽（移动超过5px）
+            if (!isDragging && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
+                isDragging = true;
+                draggedBlock.classList.add('dragging');
+            }
+
+            if (!isDragging) return;
+
             const type = draggedBlock.dataset.type;
             const width = parseInt(draggedBlock.dataset.width);
             const height = parseInt(draggedBlock.dataset.height);
@@ -462,21 +494,37 @@
         function stopDrag(e) {
             if (!draggedBlock) return;
 
-            draggedBlock.classList.remove('dragging');
+            const block = draggedBlock;
 
-            const type = draggedBlock.dataset.type;
-            const width = parseInt(draggedBlock.dataset.width);
-            const height = parseInt(draggedBlock.dataset.height);
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchmove', drag);
+            document.removeEventListener('touchend', stopDrag);
 
-            let currentLeft = parseInt(draggedBlock.style.left);
-            let currentTop = parseInt(draggedBlock.style.top);
+            // 判断是点击还是拖拽
+            if (!isDragging) {
+                // 是点击操作
+                handleClick(block, e);
+                draggedBlock = null;
+                return;
+            }
+
+            // 是拖拽操作
+            block.classList.remove('dragging');
+
+            const type = block.dataset.type;
+            const width = parseInt(block.dataset.width);
+            const height = parseInt(block.dataset.height);
+
+            let currentLeft = parseInt(block.style.left);
+            let currentTop = parseInt(block.style.top);
 
             // 转换为网格坐标
             let newCol = Math.round((currentLeft - 3) / CELL_SIZE);
             let newRow = Math.round((currentTop - 3) / CELL_SIZE);
 
             // 获取原始位置
-            const blockData = blocks.find(b => b.element === draggedBlock);
+            const blockData = blocks.find(b => b.element === block);
             const oldRow = blockData.row;
             const oldCol = blockData.col;
 
@@ -487,19 +535,19 @@
                 // 竖向滑块，只能上下移动
                 newCol = oldCol; // 保持列不变
                 // 找到从oldRow到newRow路径上最近的有效位置
-                newRow = findValidPosition(draggedBlock, oldRow, newRow, oldCol, width, height, 'vertical');
+                newRow = findValidPosition(block, oldRow, newRow, oldCol, width, height, 'vertical');
                 hasMoved = newRow !== oldRow;
             } else if (type === 'b' || type === 'B') {
                 // 横向滑块，只能左右移动
                 newRow = oldRow; // 保持行不变
                 // 找到从oldCol到newCol路径上最近的有效位置
-                newCol = findValidPosition(draggedBlock, oldCol, newCol, oldRow, width, height, 'horizontal');
+                newCol = findValidPosition(block, oldCol, newCol, oldRow, width, height, 'horizontal');
                 hasMoved = newCol !== oldCol;
             }
 
             // 更新位置
-            draggedBlock.style.left = (newCol * CELL_SIZE + 3) + 'px';
-            draggedBlock.style.top = (newRow * CELL_SIZE + 3) + 'px';
+            block.style.left = (newCol * CELL_SIZE + 3) + 'px';
+            block.style.top = (newRow * CELL_SIZE + 3) + 'px';
 
             // 更新数据
             blockData.row = newRow;
@@ -511,10 +559,6 @@
                 checkWin();
             }
 
-            document.removeEventListener('mousemove', drag);
-            document.removeEventListener('mouseup', stopDrag);
-            document.removeEventListener('touchmove', drag);
-            document.removeEventListener('touchend', stopDrag);
             draggedBlock = null;
         }
 
@@ -550,6 +594,123 @@
             }
 
             return validPos;
+        }
+
+        function handleClick(block, e) {
+            const blockData = blocks.find(b => b.element === block);
+            const type = block.dataset.type;
+            const width = parseInt(block.dataset.width);
+            const height = parseInt(block.dataset.height);
+
+            // 获取点击位置
+            const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+            const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
+
+            const rect = block.getBoundingClientRect();
+            const clickX = clientX - rect.left;
+            const clickY = clientY - rect.top;
+
+            const blockCenterX = rect.width / 2;
+            const blockCenterY = rect.height / 2;
+
+            let direction = null;
+
+            if (type === 'a' || type === 'A') {
+                // 竖向滑块：根据点击在上半部分还是下半部分
+                if (clickY < blockCenterY) {
+                    direction = 'down';
+                } else {
+                    direction = 'up';
+                }
+            } else if (type === 'b' || type === 'B') {
+                // 横向滑块：根据点击在左半部分还是右半部分
+                if (clickX < blockCenterX) {
+                    direction = 'right';
+                } else {
+                    direction = 'left';
+                }
+            }
+
+            moveBlockByClick(block, blockData, direction, width, height);
+        }
+
+        function moveBlockByClick(block, blockData, direction, width, height) {
+            const oldRow = blockData.row;
+            const oldCol = blockData.col;
+            let newRow = oldRow;
+            let newCol = oldCol;
+
+            // 根据方向计算目标位置（移动一格）
+            switch (direction) {
+                case 'up':
+                    newRow = oldRow - 1;
+                    break;
+                case 'down':
+                    newRow = oldRow + 1;
+                    break;
+                case 'left':
+                    newCol = oldCol - 1;
+                    break;
+                case 'right':
+                    newCol = oldCol + 1;
+                    break;
+            }
+
+            // 检查是否可以移动
+            if (isValidMove(block, newRow, newCol, width, height)) {
+                // 可以移动，执行动画
+                isAnimating = true;
+                block.classList.add('moving');
+
+                blockData.row = newRow;
+                blockData.col = newCol;
+
+                block.style.left = (newCol * CELL_SIZE + 3) + 'px';
+                block.style.top = (newRow * CELL_SIZE + 3) + 'px';
+
+                setTimeout(() => {
+                    block.classList.remove('moving');
+                    isAnimating = false;
+                    moveCount++;
+                    updateMoveCount();
+                    checkWin();
+                }, 300);
+            } else {
+                // 不能移动，播放被挡动画
+                playBlockedAnimation(block, direction);
+            }
+        }
+
+        function playBlockedAnimation(block, direction) {
+            isAnimating = true;
+
+            // 设置抖动方向
+            const shakeDistance = '8px';
+            switch (direction) {
+                case 'up':
+                    block.style.setProperty('--shake-x', '0');
+                    block.style.setProperty('--shake-y', `-${shakeDistance}`);
+                    break;
+                case 'down':
+                    block.style.setProperty('--shake-x', '0');
+                    block.style.setProperty('--shake-y', shakeDistance);
+                    break;
+                case 'left':
+                    block.style.setProperty('--shake-x', `-${shakeDistance}`);
+                    block.style.setProperty('--shake-y', '0');
+                    break;
+                case 'right':
+                    block.style.setProperty('--shake-x', shakeDistance);
+                    block.style.setProperty('--shake-y', '0');
+                    break;
+            }
+
+            block.classList.add('blocked');
+
+            setTimeout(() => {
+                block.classList.remove('blocked');
+                isAnimating = false;
+            }, 400);
         }
 
         function isValidMove(block, newRow, newCol, width, height) {
