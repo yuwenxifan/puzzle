@@ -44,8 +44,8 @@
 
         #game-board {
             position: relative;
-            width: 616px;
-            height: 616px;
+            width: 600px;
+            height: 600px;
             max-width: 100%;
             aspect-ratio: 1;
             background-color: #8B4513;
@@ -54,12 +54,13 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             margin: 0 auto;
             touch-action: none;
+            box-sizing: content-box;
         }
 
         @media (max-width: 650px) {
             #game-board {
-                width: calc(100vw - 20px);
-                height: calc(100vw - 20px);
+                width: calc(100vw - 40px);
+                height: calc(100vw - 40px);
                 max-width: 600px;
                 max-height: 600px;
             }
@@ -94,7 +95,6 @@
             position: absolute;
             bottom: -5px;
             left: 50%;
-            transform: translateX(-50%);
             width: 16.67%;
             height: 10px;
             background-color: #ff4444;
@@ -106,7 +106,7 @@
         .exit-marker::before {
             content: "出口";
             position: absolute;
-            top: -25px;
+            top: 10px;
             left: 50%;
             transform: translateX(-50%);
             color: white;
@@ -315,7 +315,7 @@
         // 计算实际单元格大小
         function updateCellSize() {
             const board = document.getElementById('game-board');
-            const boardWidth = board.offsetWidth;
+            const boardWidth = board.offsetWidth - 16;
             CELL_SIZE = boardWidth / GRID_SIZE;
         }
 
@@ -484,21 +484,17 @@
             let hasMoved = false;
 
             if (type === 'a' || type === 'A') {
-                // 竖向滑块
+                // 竖向滑块，只能上下移动
                 newCol = oldCol; // 保持列不变
-                if (isValidMove(draggedBlock, newRow, newCol, width, height, oldRow, oldCol)) {
-                    hasMoved = newRow !== oldRow;
-                } else {
-                    newRow = oldRow; // 恢复原位
-                }
+                // 找到从oldRow到newRow路径上最近的有效位置
+                newRow = findValidPosition(draggedBlock, oldRow, newRow, oldCol, width, height, 'vertical');
+                hasMoved = newRow !== oldRow;
             } else if (type === 'b' || type === 'B') {
-                // 横向滑块
+                // 横向滑块，只能左右移动
                 newRow = oldRow; // 保持行不变
-                if (isValidMove(draggedBlock, newRow, newCol, width, height, oldRow, oldCol)) {
-                    hasMoved = newCol !== oldCol;
-                } else {
-                    newCol = oldCol; // 恢复原位
-                }
+                // 找到从oldCol到newCol路径上最近的有效位置
+                newCol = findValidPosition(draggedBlock, oldCol, newCol, oldRow, width, height, 'horizontal');
+                hasMoved = newCol !== oldCol;
             }
 
             // 更新位置
@@ -522,7 +518,41 @@
             draggedBlock = null;
         }
 
-        function isValidMove(block, newRow, newCol, width, height, oldRow, oldCol) {
+        function findValidPosition(block, oldPos, newPos, fixedPos, width, height, direction) {
+            // 如果没有移动，直接返回原位置
+            if (oldPos === newPos) {
+                return oldPos;
+            }
+
+            // 确定移动方向（正向或负向）
+            const step = newPos > oldPos ? 1 : -1;
+            let validPos = oldPos;
+
+            // 从起始位置逐格检查到目标位置
+            for (let pos = oldPos + step; step > 0 ? pos <= newPos : pos >= newPos; pos += step) {
+                let testRow, testCol;
+
+                if (direction === 'vertical') {
+                    testRow = pos;
+                    testCol = fixedPos;
+                } else {
+                    testRow = fixedPos;
+                    testCol = pos;
+                }
+
+                // 检查这个位置是否有效
+                if (isValidMove(block, testRow, testCol, width, height)) {
+                    validPos = pos;
+                } else {
+                    // 遇到障碍物，停止检查
+                    break;
+                }
+            }
+
+            return validPos;
+        }
+
+        function isValidMove(block, newRow, newCol, width, height) {
             // 检查是否超出边界
             if (newRow < 0 || newCol < 0 ||
                 newRow + height > GRID_SIZE ||
