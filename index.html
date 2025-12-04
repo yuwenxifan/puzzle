@@ -106,7 +106,7 @@
         .exit-marker::before {
             content: "出口";
             position: absolute;
-            top: 10px;
+            top: 15px;
             left: 50%;
             transform: translateX(-50%);
             color: white;
@@ -208,7 +208,7 @@
         }
 
         .controls {
-            margin-top: 20px;
+            margin-top: 50px;
         }
 
         button {
@@ -296,6 +296,65 @@
         .overlay.show {
             display: block;
         }
+
+        .confirm-dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
+            display: none;
+            z-index: 1001;
+            text-align: center;
+            max-width: 90%;
+            min-width: 300px;
+        }
+
+        .confirm-dialog.show {
+            display: block;
+            animation: popIn 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        .confirm-dialog h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .confirm-dialog .buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .confirm-dialog button {
+            padding: 10px 25px;
+            font-size: 14px;
+            margin: 0;
+        }
+
+        .confirm-dialog .btn-cancel {
+            background-color: #e0e0e0;
+            color: #333;
+        }
+
+        .confirm-dialog .btn-confirm {
+            background-color: #667eea;
+            color: white;
+        }
+
+        .progress-indicator {
+            display: inline-block;
+            margin-left: 10px;
+            padding: 3px 10px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -303,7 +362,7 @@
         <h1>🎮 华容道游戏</h1>
         <div class="game-info">
             <p>拖动滑块，将红色特殊滑块移动到下方出口！</p>
-            <p>步数: <span id="move-count">0</span></p>
+            <p>步数: <span id="move-count">0</span><span id="progress-indicator" class="progress-indicator" style="display: none;">已保存进度</span></p>
         </div>
         <div id="game-board">
             <div class="exit-marker"></div>
@@ -319,7 +378,16 @@
         <h2>🎉 恭喜你！</h2>
         <p>你成功完成了华容道！</p>
         <p>总步数: <span id="final-moves">0</span></p>
-        <button onclick="resetGame()">再玩一次</button>
+        <button onclick="confirmReset()">再玩一次</button>
+    </div>
+
+    <div class="confirm-dialog" id="confirm-dialog">
+        <h3>确认重置游戏？</h3>
+        <p>当前进度将会丢失</p>
+        <div class="buttons">
+            <button class="btn-cancel" onclick="cancelReset()">取消</button>
+            <button class="btn-confirm" onclick="doReset()">确认重置</button>
+        </div>
     </div>
 
     <script>
@@ -334,11 +402,60 @@
         let isDragging = false;
         let isAnimating = false;
 
+        const STORAGE_KEY = 'huarongdao_progress';
+
         // 计算实际单元格大小
         function updateCellSize() {
             const board = document.getElementById('game-board');
             const boardWidth = board.offsetWidth - 16;
             CELL_SIZE = boardWidth / GRID_SIZE;
+        }
+
+        // 保存进度到localStorage
+        function saveProgress() {
+            const progress = {
+                blocks: blocks.map(b => ({
+                    id: b.id,
+                    row: b.row,
+                    col: b.col
+                })),
+                moveCount: moveCount,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+            showProgressIndicator();
+        }
+
+        // 从localStorage加载进度
+        function loadProgress() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (!saved) return null;
+
+                const progress = JSON.parse(saved);
+                return progress;
+            } catch (e) {
+                console.error('加载进度失败:', e);
+                return null;
+            }
+        }
+
+        // 清除保存的进度
+        function clearProgress() {
+            localStorage.removeItem(STORAGE_KEY);
+            hideProgressIndicator();
+        }
+
+        // 显示进度指示器
+        function showProgressIndicator() {
+            const indicator = document.getElementById('progress-indicator');
+            indicator.style.display = 'inline-block';
+        }
+
+        // 隐藏进度指示器
+        function hideProgressIndicator() {
+            const indicator = document.getElementById('progress-indicator');
+            indicator.style.display = 'none';
         }
 
         // 初始布局配置
@@ -359,7 +476,7 @@
             { id: 'b6', type: 'b', row: 5, col: 4, width: 2, height: 1 }
         ];
 
-        function initGame() {
+        function initGame(useProgress = true) {
             const board = document.getElementById('game-board');
 
             // 更新单元格大小
@@ -371,7 +488,9 @@
 
             blocks = [];
             moveCount = 0;
-            updateMoveCount();
+
+            // 尝试加载保存的进度
+            const savedProgress = useProgress ? loadProgress() : null;
 
             // 创建网格线
             createGridLines();
@@ -380,6 +499,34 @@
             initialLayout.forEach(config => {
                 createBlock(config);
             });
+
+            // 如果有保存的进度，应用它
+            if (savedProgress) {
+                applyProgress(savedProgress);
+            } else {
+                hideProgressIndicator();
+            }
+
+            updateMoveCount();
+        }
+
+        // 应用保存的进度
+        function applyProgress(progress) {
+            moveCount = progress.moveCount || 0;
+
+            progress.blocks.forEach(savedBlock => {
+                const block = blocks.find(b => b.id === savedBlock.id);
+                if (block) {
+                    block.row = savedBlock.row;
+                    block.col = savedBlock.col;
+
+                    // 更新DOM位置
+                    block.element.style.left = (block.col * CELL_SIZE + 3) + 'px';
+                    block.element.style.top = (block.row * CELL_SIZE + 3) + 'px';
+                }
+            });
+
+            showProgressIndicator();
         }
 
         function createGridLines() {
@@ -556,6 +703,7 @@
             if (hasMoved) {
                 moveCount++;
                 updateMoveCount();
+                saveProgress();
                 checkWin();
             }
 
@@ -673,8 +821,9 @@
                     isAnimating = false;
                     moveCount++;
                     updateMoveCount();
+                    saveProgress();
                     checkWin();
-                }, 300);
+                }, 250);
             } else {
                 // 不能移动，播放被挡动画
                 playBlockedAnimation(block, direction);
@@ -755,6 +904,7 @@
         }
 
         function showWinMessage() {
+            clearProgress(); // 完成游戏后清除进度
             document.getElementById('overlay').classList.add('show');
             document.getElementById('win-message').classList.add('show');
             document.getElementById('final-moves').textContent = moveCount;
@@ -764,21 +914,62 @@
             document.getElementById('move-count').textContent = moveCount;
         }
 
-        function resetGame() {
+        function confirmReset() {
+            document.getElementById('overlay').classList.add('show');
+            document.getElementById('confirm-dialog').classList.add('show');
+        }
+
+        function cancelReset() {
             document.getElementById('overlay').classList.remove('show');
+            document.getElementById('confirm-dialog').classList.remove('show');
+        }
+
+        function doReset() {
+            document.getElementById('overlay').classList.remove('show');
+            document.getElementById('confirm-dialog').classList.remove('show');
             document.getElementById('win-message').classList.remove('show');
-            initGame();
+            clearProgress();
+            initGame(false); // 不使用保存的进度
+        }
+
+        function resetGame() {
+            confirmReset();
         }
 
         // 初始化游戏
-        window.onload = initGame;
+        window.onload = function() {
+            initGame(true); // 启动时尝试加载进度
+        };
 
-        // 窗口大小改变时重新计算
+        // 窗口大小改变时重新计算（保留当前进度）
         let resizeTimer;
         window.addEventListener('resize', function() {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(function() {
-                initGame();
+                // 保存当前状态
+                const currentState = {
+                    blocks: blocks.map(b => ({
+                        id: b.id,
+                        row: b.row,
+                        col: b.col
+                    })),
+                    moveCount: moveCount
+                };
+
+                // 重新初始化
+                updateCellSize();
+                const board = document.getElementById('game-board');
+                const existingBlocks = board.querySelectorAll('.block');
+                existingBlocks.forEach(block => block.remove());
+
+                blocks = [];
+                createGridLines();
+                initialLayout.forEach(config => {
+                    createBlock(config);
+                });
+
+                // 恢复状态
+                applyProgress(currentState);
             }, 250);
         });
     </script>
